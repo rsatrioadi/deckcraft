@@ -179,11 +179,29 @@ fn startup(mut control_port: Option<u16>, args: impl IntoIterator<Item = String>
 }
 
 fn app_icon() -> Option<egui::IconData> {
+    // eframe hands this icon to `setApplicationIconImage`, which would replace the bundle's own
+    // icon (`CFBundleIconFile`) in the Dock while the app runs. An empty icon makes eframe leave
+    // it alone; no icon at all would show egui's logo instead.
+    #[cfg(target_os = "macos")]
+    if std::env::current_exe().is_ok_and(|exe| in_app_bundle(&exe)) {
+        return Some(egui::IconData::default());
+    }
     #[cfg(target_os = "macos")]
     let png: &[u8] = include_bytes!("../../../assets/app-icon/deckcraft-macos-512.png");
     #[cfg(not(target_os = "macos"))]
     let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.deckcraft.png");
     eframe::icon_data::from_png_bytes(png).map_err(|e| log::warn!("app icon: {e}")).ok()
+}
+
+/// Whether `exe` is the executable of a macOS app bundle: `<name>.app/Contents/MacOS/<exe>`.
+#[cfg(any(target_os = "macos", test))]
+fn in_app_bundle(exe: &std::path::Path) -> bool {
+    let macos = exe.parent();
+    let contents = macos.and_then(|d| d.parent());
+    let app = contents.and_then(|d| d.parent());
+    macos.and_then(|d| d.file_name()).is_some_and(|n| n == "MacOS")
+        && contents.and_then(|d| d.file_name()).is_some_and(|n| n == "Contents")
+        && app.and_then(|d| d.extension()).is_some_and(|e| e.eq_ignore_ascii_case("app"))
 }
 
 /// Install logging, parse startup arguments and environment, launch the native app, and
@@ -310,6 +328,19 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inside a bundle the app keeps the bundle's Dock icon (see `app_icon`).
+    #[test]
+    fn in_app_bundle_matches_only_the_bundle_executable() {
+        use std::path::Path;
+        assert!(in_app_bundle(Path::new("/Applications/DeckCraft.app/Contents/MacOS/DeckCraft")));
+        assert!(in_app_bundle(Path::new("/tmp/Test.APP/Contents/MacOS/deckcraft")));
+        assert!(!in_app_bundle(Path::new("/Users/me/deckcraft/target/release/deckcraft")));
+        assert!(!in_app_bundle(Path::new("/Applications/DeckCraft.app/Contents/Resources/DeckCraft")));
+        assert!(!in_app_bundle(Path::new("/opt/DeckCraft/Contents/MacOS/DeckCraft")));
+        assert!(!in_app_bundle(Path::new("Contents/MacOS/DeckCraft")));
+        assert!(!in_app_bundle(Path::new("DeckCraft")));
+    }
 
     /// #279: on macOS the process ends inside `on_exit`, before eframe would tear the window down.
     /// The check runs in a child (this test binary again), since on macOS it ends the process.
