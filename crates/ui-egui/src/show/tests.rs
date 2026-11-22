@@ -1444,6 +1444,36 @@ fn windowed_show_close_keeps_clean_and_dirty_documents() {
     }
 }
 
+/// A quit during a windowed show (the Dock's Quit) is not the window's close button: it ends
+/// the show and goes on, closing a saved deck and asking about an unsaved one.
+#[test]
+fn a_quit_during_a_windowed_show_still_quits() {
+    for dirty in [false, true] {
+        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
+        if dirty {
+            app.session.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 40, 40]})).unwrap();
+        }
+        app.ui.presenter_view = false;
+        app.start_show(0, false);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.request_quit(ui.ctx()));
+        output.textures_delta.clear();
+        assert!(output.viewport_output[&egui::ViewportId::ROOT].commands.contains(&egui::ViewportCommand::Close));
+        let mut input = egui::RawInput::default();
+        input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| {
+            app.logic(ui.ctx());
+            app.logic(ui.ctx());
+        });
+        output.textures_delta.clear();
+        assert!(app.show.is_none(), "the quit ends the show");
+        let cancelled = output.viewport_output[&egui::ViewportId::ROOT].commands.contains(&egui::ViewportCommand::CancelClose);
+        assert_eq!(cancelled, dirty, "a saved deck closes, an unsaved one is kept open");
+        assert_eq!(app.dialog.as_ref().map(|d| d.id.as_str()), dirty.then_some("quit"));
+        assert!(!app.quit_requested, "the next close is the close button again");
+    }
+}
+
 /// #2202: the custom macOS drag strip belongs outside the slide. Clicking or dragging it
 /// must not advance playback, while clicks in the slide still do.
 #[test]

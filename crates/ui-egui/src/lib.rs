@@ -310,6 +310,9 @@ pub struct SlideApp {
     pub last_recovery: f64,
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
+    /// The next close request is a quit ([`SlideApp::request_quit`]), not the window's close
+    /// button: during a slide show it ends the show and goes on instead of only ending the show.
+    pub(crate) quit_requested: bool,
     pub(crate) notes_buf: (u64, usize, notes::Draft),
     /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
     pub ui_fonts: uifonts::UiFonts,

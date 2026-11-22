@@ -94,6 +94,7 @@ impl SlideApp {
             last_time: 0.0,
             last_recovery: 0.0,
             quit_confirmed: false,
+            quit_requested: false,
             notes_buf: (0, usize::MAX, notes::Draft::default()),
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
@@ -125,6 +126,14 @@ impl SlideApp {
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
         self
+    }
+
+    /// Quit the app (the Dock's Quit, the app menu's Quit), as opposed to closing its window.
+    /// During a windowed slide show the window's close button only ends the show; a quit ends
+    /// it too and then quits, asking about unsaved changes first.
+    pub fn request_quit(&mut self, ctx: &egui::Context) {
+        self.quit_requested = true;
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
@@ -249,17 +258,24 @@ impl SlideApp {
         }
         // The root window is also the audience window. Its close button ends playback,
         // not the application; consume this event so a repeated pass cannot quit the editor.
+        // A quit (`request_quit`) ends the show too, then goes on closing.
+        let close = ctx.input(|i| i.viewport().close_requested());
         if !self.quit_confirmed
-            && ctx.input(|i| i.viewport().close_requested())
+            && close
             && let Some(show) = self.show.take()
         {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.input_mut(|i| {
-                if let Some(viewport) = i.raw.viewports.get_mut(&i.raw.viewport_id) {
-                    viewport.events.retain(|e| *e != egui::ViewportEvent::Close);
-                }
-            });
+            if !self.quit_requested {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.input_mut(|i| {
+                    if let Some(viewport) = i.raw.viewports.get_mut(&i.raw.viewport_id) {
+                        viewport.events.retain(|e| *e != egui::ViewportEvent::Close);
+                    }
+                });
+            }
             show::end(self, ctx, show, ctx.input(|i| i.time));
+        }
+        if close {
+            self.quit_requested = false;
         }
         // Closing the editor with unsaved changes still asks first.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed && self.session.documents().iter().any(|d| d.is_dirty()) {
